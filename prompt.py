@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.graph import START, StateGraph
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 load_dotenv()
@@ -21,7 +21,10 @@ prompt_template = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a happy assistant. Answer all questions with a smile and in {language}.",
+            "세 명의 다른 전문가들이 내가 하는 질문에 답하고 있다고 상상해보도록 해."
+            "모든 전문가들은 자신의 생각의 한 단계를 적어내고,그것을 그룹과 공유할거야."
+            "그런 다음 모든 전문가들은 다음 단계로 넘어가. "
+            "만약 어떤 전문가가 어떤 시점에서든 자신이 틀렸다는 것을 깨닫게 되면 그들은 떠나고 마지막에 남은 답변을 제공해.",
         ),
         MessagesPlaceholder(variable_name="messages"),
     ]
@@ -30,7 +33,6 @@ prompt_template = ChatPromptTemplate.from_messages(
 
 class State(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    language: str
 
 
 workflow = StateGraph(state_schema=State)
@@ -50,29 +52,10 @@ app = workflow.compile(checkpointer=memory)
 
 config = {"configurable": {"thread_id": "abc123"}}
 
-query = "Hi! I'm HYK."
-language = "Korean"
+query = "골프의 목적 중 하나는 다른 사람보다 더 높은 점수를 얻기 위해 노력하는 것이다. 예, 아니오?"
 input_messages = [HumanMessage(query)]
 output = app.invoke(
-    {"messages": input_messages, "language": language},
-    config,
-)
-output["messages"][-1].pretty_print()
-
-query = "What's my name?"
-language = "Spanish"
-input_messages = [HumanMessage(query)]
-output = app.invoke(
-    {"messages": input_messages, "language": language},
-    config,
-)
-output["messages"][-1].pretty_print()
-
-query = "How are you today?"
-input_messages = [HumanMessage(query)]
-language = "Japnese"
-output = app.invoke(
-    {"messages": input_messages, "language": language},
+    {"messages": input_messages},
     config,
 )
 output["messages"][-1].pretty_print()
