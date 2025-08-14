@@ -1,122 +1,63 @@
-import os
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain.chains import RetrievalQA
+from langchain.chat_models import init_chat_model
+from langchain_core.documents import Document
 from dotenv import load_dotenv
 
 load_dotenv()
 
-llm_key = os.getenv("GOOGLE_API_KEY")
-if not llm_key:
-    raise EnvironmentError("GOOGLE_API_KEY not found in .env")
+long_text = """
+대규모 언어 모델(LLM)은 자연어 이해와 생성 능력을 가진 인공지능 모델입니다.
+이 모델은 방대한 양의 텍스트 데이터로 사전 학습되며, 다양한 언어 관련 작업에 활용될 수 있습니다.
 
-from langchain.chat_models import init_chat_model
+프롬프트 엔지니어링은 LLM이 원하는 출력을 생성하도록 유도하는 기술입니다.
+ReAct는 추론과 행동을 결합하여 복잡한 문제를 해결하는 프레임워크입니다.
+이러한 기술들은 LLM의 성능을 극대화하는 데 중요한 역할을 합니다.
 
-llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+RAG(Retrieval-Augmented Generation)는 외부 지식을 활용하여 LLM의 답변을 강화하는 기술입니다.
+RAG 시스템은 외부 문서에서 정보를 검색하고, 그 정보를 모델의 컨텍스트에 추가하여 답변의 정확성과 신뢰성을 높입니다.
+이 과정에서 텍스트 분할(Text Splitting)은 긴 문서를 작은 청크로 나누어 효율적인 검색을 가능하게 하는 핵심적인 전처리 기술로 사용됩니다.
+"""
 
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+docs = [Document(page_content=long_text, metadata={"source": "example_document"})]
 
-embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 
-from langchain_core.vectorstores import InMemoryVectorStore
-
-vector_store = InMemoryVectorStore(embeddings)
-
-from typing import Literal
-
-from typing import Literal
-
-import bs4
-from langchain import hub
-from langchain_community.document_loaders import WebBaseLoader
-from langchain_core.documents import Document
-from langchain_core.vectorstores import InMemoryVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langgraph.graph import START, StateGraph
-from typing_extensions import Annotated, List, TypedDict
-
-# Load and chunk contents of the blog
-loader = WebBaseLoader(
-    web_paths=("https://lilianweng.github.io/posts/2023-06-23-agent/",),
-    bs_kwargs=dict(
-        parse_only=bs4.SoupStrainer(
-            class_=("post-content", "post-title", "post-header")
-        )
-    ),
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=150,
+    chunk_overlap=20,
+    length_function=len,
 )
-docs = loader.load()
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-all_splits = text_splitter.split_documents(docs)
+chunks = text_splitter.split_documents(docs)
 
+print(f"청크 개수: {len(chunks)}\n")
 
-# Update metadata (illustration purposes)
-total_documents = len(all_splits)
-third = total_documents // 3
+embedding_model = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
 
-for i, document in enumerate(all_splits):
-    if i < third:
-        document.metadata["section"] = "beginning"
-    elif i < 2 * third:
-        document.metadata["section"] = "middle"
-    else:
-        document.metadata["section"] = "end"
+vectorstore = Chroma.from_documents(documents=chunks, embedding=embedding_model)
 
+retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
-# Index chunks
-vector_store = InMemoryVectorStore(embeddings)
-_ = vector_store.add_documents(all_splits)
+openai_model = init_chat_model("gpt-4o-mini", model_provider="openai")
 
+qa_chain = RetrievalQA.from_chain_type(
+    llm=openai_model,
+    chain_type="stuff",
+    retriever=retriever,
+)
 
-# Define schema for search
-class Search(TypedDict):
-    """Search query."""
+query = "RAG가 무엇인지 설명해줘."
 
-    query: Annotated[str, ..., "Search query to run."]
-    section: Annotated[
-        Literal["beginning", "middle", "end"],
-        ...,
-        "Section to query.",
-    ]
+print(f"질문: {query}")
+response = qa_chain.invoke(query)
+print(f"답변: {response}")
 
-
-# Define prompt for question-answering
-prompt = hub.pull("rlm/rag-prompt")
-
-
-# Define state for application
-class State(TypedDict):
-    question: str
-    query: Search
-    context: List[Document]
-    answer: str
-
-
-def analyze_query(state: State):
-    structured_llm = llm.with_structured_output(Search)
-    query = structured_llm.invoke(state["question"])
-    return {"query": query}
-
-
-def retrieve(state: State):
-    query = state["query"]
-    retrieved_docs = vector_store.similarity_search(
-        query["query"],
-        filter=lambda doc: doc.metadata.get("section") == query["section"],
-    )
-    return {"context": retrieved_docs}
-
-
-def generate(state: State):
-    docs_content = "\n\n".join(doc.page_content for doc in state["context"])
-    messages = prompt.invoke({"question": state["question"], "context": docs_content})
-    response = llm.invoke(messages)
-    return {"answer": response.content}
-
-
-graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve, generate])
-graph_builder.add_edge(START, "analyze_query")
-graph = graph_builder.compile()
-
-for step in graph.stream(
-    {"question": "What does the end of the post say about Task Decomposition?"},
-    stream_mode="updates",
-):
-    print(f"{step}\n\n----------------\n")
+print("\n--- 검색된 청크(문맥) ---")
+retrieved_docs = retriever.invoke(query)
+for i, doc in enumerate(retrieved_docs):
+    print(f"청크 {i+1}:\n{doc.page_content}\n")

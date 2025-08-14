@@ -22,7 +22,7 @@ tools = [add, multiply]
 
 from langchain.chat_models import init_chat_model
 
-llm = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+llm = init_chat_model("gpt-4o-mini", model_provider="openai")
 llm_with_tools = llm.bind_tools(tools)
 
 from langchain_core.messages import HumanMessage

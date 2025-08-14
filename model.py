@@ -3,14 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-key = os.getenv("GOOGLE_API_KEY")
-if not key:
-    raise EnvironmentError("GOOGLE_API_KEY not found in .env")
-
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 
-model = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+gemini_model = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+openai_model = init_chat_model("gpt-4o-mini", model_provider="openai")
+
 
 # resp = model.invoke(
 #     [
@@ -28,7 +26,7 @@ workflow = StateGraph(state_schema=MessagesState)
 
 
 def call_model(state: MessagesState):
-    response = model.invoke(state["messages"])
+    response = openai_model.invoke(state["messages"])
     return {"messages": response}
 
 
